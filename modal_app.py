@@ -40,10 +40,13 @@ image = (
         "fastapi[standard]",
         "python-multipart",
     )
-    # leva os módulos locais para dentro do container
-    .add_local_python_source("detector", "processor")
+    # leva os módulos locais para dentro do container.
+    # copy=True assa os arquivos como camada de build (em vez de mount no fim
+    # do build); evita o erro "modified during build process" quando o editor
+    # ou o git tocam o arquivo durante a instalação das deps.
+    .add_local_python_source("detector", "processor", copy=True)
     # serve o front a partir do arquivo local
-    .add_local_file("frontend.html", "/assets/index.html")
+    .add_local_file("frontend.html", "/assets/index.html", copy=True)
 )
 
 # Estado compartilhado entre o web e a GPU.
