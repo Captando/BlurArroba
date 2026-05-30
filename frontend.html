@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BlurArroba — anonimizar @ em vídeos</title>
+<style>
+  :root { --bg:#0e1116; --card:#171b22; --line:#262c36; --txt:#e6e9ef; --mut:#9aa4b2; --acc:#6ea8fe; --ok:#3fb950; --err:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--txt); display:flex; min-height:100vh; align-items:flex-start; justify-content:center; padding:32px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; width:100%; max-width:560px; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:13px; }
+  .drop { border:2px dashed var(--line); border-radius:12px; padding:28px; text-align:center; cursor:pointer; transition:.15s; }
+  .drop:hover, .drop.over { border-color:var(--acc); background:#1b2230; }
+  .drop b { color:var(--acc); }
+  .drop small { display:block; color:var(--mut); margin-top:6px; }
+  .file { margin-top:12px; font-size:13px; color:var(--mut); word-break:break-all; }
+  .opts { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:18px 0; }
+  label { font-size:12px; color:var(--mut); display:block; margin-bottom:4px; }
+  select, input[type=number], input[type=text] { width:100%; background:#0e1116; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:14px; }
+  button { width:100%; background:var(--acc); color:#06122b; border:0; border-radius:9px; padding:12px; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .bar { height:10px; background:#0e1116; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-top:8px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .3s; }
+  .status { margin-top:18px; font-size:14px; }
+  .status .row { display:flex; justify-content:space-between; align-items:center; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  .pill.err { color:var(--err); border-color:var(--err); }
+  a.dl { display:block; text-align:center; text-decoration:none; margin-top:14px; background:var(--ok); color:#04210d; padding:12px; border-radius:9px; font-weight:600; }
+  .adv { margin-top:14px; font-size:12px; color:var(--mut); }
+  .adv summary { cursor:pointer; }
+  .adv input { margin-top:6px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:6px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>BlurArroba</h1>
+    <p class="sub">Detecta texto com <b>@</b> no vídeo e aplica blur/pixelização. Processado em GPU na nuvem (Modal).</p>
+
+    <div id="drop" class="drop">
+      <div>Arraste um vídeo aqui ou <b>clique para escolher</b></div>
+      <small>.mp4 .mov .mkv .webm .avi</small>
+    </div>
+    <input id="file" type="file" accept="video/*,.mp4,.mov,.mkv,.webm,.avi" hidden />
+    <div id="fname" class="file"></div>
+
+    <div class="opts">
+      <div>
+        <label>Modo</label>
+        <select id="mode">
+          <option value="pixelate">Pixelizar</option>
+          <option value="gaussian">Desfoque (gaussian)</option>
+        </select>
+      </div>
+      <div>
+        <label>Intensidade</label>
+        <input id="strength" type="number" value="14" min="2" max="60" />
+      </div>
+    </div>
+
+    <button id="go" disabled>Enviar e processar</button>
+    <div id="warm" class="hint"></div>
+
+    <div id="status" class="status" style="display:none">
+      <div class="row">
+        <span id="stxt">Na fila…</span>
+        <span id="spill" class="pill">queued</span>
+      </div>
+      <div class="bar"><i id="bar"></i></div>
+      <a id="dl" class="dl" style="display:none" href="#">Baixar vídeo processado</a>
+    </div>
+
+    <details class="adv">
+      <summary>Avançado</summary>
+      <label style="margin-top:8px">API base (deixe vazio para usar o mesmo host)</label>
+      <input id="apibase" type="text" placeholder="https://seu-app.modal.run" />
+    </details>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const drop = $('drop'), fileInput = $('file');
+let chosen = null, warmed = false;
+
+function apiBase() {
+  const v = $('apibase').value.trim().replace(/\/$/, '');
+  return v || '';
+}
+
+// abrir seletor
+drop.addEventListener('click', () => fileInput.click());
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) setFile(ev.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+function setFile(f) {
+  chosen = f;
+  $('fname').textContent = `Selecionado: ${f.name} (${(f.size/1048576).toFixed(1)} MB)`;
+  $('go').disabled = false;
+  wakeGpu(); // acorda a GPU assim que o arquivo é escolhido
+}
+
+// acorda o container GPU enquanto o usuário ainda vai clicar em enviar
+async function wakeGpu() {
+  if (warmed) return;
+  warmed = true;
+  $('warm').textContent = '⚡ Acordando a GPU na nuvem…';
+  try {
+    await fetch(apiBase() + '/wake', { method: 'POST' });
+    $('warm').textContent = '✅ GPU pronta para receber o vídeo.';
+  } catch (e) {
+    $('warm').textContent = '';
+    warmed = false;
+  }
+}
+
+$('go').addEventListener('click', upload);
+
+async function upload() {
+  if (!chosen) return;
+  $('go').disabled = true;
+  $('status').style.display = 'block';
+  setStatus('uploading', 'Enviando vídeo…', 0);
+
+  const fd = new FormData();
+  fd.append('file', chosen);
+  fd.append('mode', $('mode').value);
+  fd.append('strength', $('strength').value);
+
+  let job;
+  try {
+    const r = await fetch(apiBase() + '/jobs', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + await r.text());
+    job = await r.json();
+  } catch (e) {
+    return setStatus('error', 'Falha no upload: ' + e.message, 0);
+  }
+  poll(job.job_id);
+}
+
+function setStatus(state, text, prog) {
+  $('stxt').textContent = text;
+  const pill = $('spill');
+  pill.textContent = state;
+  pill.className = 'pill' + (state === 'done' ? ' ok' : (state === 'error' ? ' err' : ''));
+  if (prog != null) $('bar').style.width = Math.round(prog * 100) + '%';
+}
+
+async function poll(jobId) {
+  try {
+    const r = await fetch(apiBase() + '/jobs/' + jobId);
+    const j = await r.json();
+    const p = j.progress || 0;
+    if (j.status === 'done') {
+      setStatus('done', 'Concluído!', 1);
+      const dl = $('dl');
+      dl.href = apiBase() + '/jobs/' + jobId + '/download';
+      dl.style.display = 'block';
+      $('go').disabled = false;
+      return;
+    }
+    if (j.status === 'error') {
+      setStatus('error', 'Erro: ' + (j.error || 'desconhecido'), 0);
+      $('go').disabled = false;
+      return;
+    }
+    const label = j.status === 'processing' ? `Processando… ${Math.round(p*100)}%` : 'Na fila…';
+    setStatus(j.status, label, p);
+  } catch (e) {
+    setStatus('processing', 'Aguardando GPU…', 0);
+  }
+  setTimeout(() => poll(jobId), 1500);
+}
+</script>
+</body>
+</html>

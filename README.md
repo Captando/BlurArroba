@@ -18,6 +18,8 @@ Arquivos principais:
 | [`main.py`](main.py) | API HTTP (FastAPI) — upload, fila de jobs e download |
 | [`detector.py`](detector.py) | Detecção de `@` com EasyOCR |
 | [`processor.py`](processor.py) | Pipeline de vídeo (tracking, blur, remux) |
+| [`modal_app.py`](modal_app.py) | Deploy serverless com GPU no Modal.com |
+| [`frontend.html`](frontend.html) | Front web (upload, progresso, download) |
 | [`test_run.py`](test_run.py) | Runner local para testar direto num arquivo |
 
 ## Requisitos
@@ -104,6 +106,28 @@ curl http://localhost:8000/jobs/abc...
 # baixa quando status == done
 curl -OJ http://localhost:8000/jobs/abc.../download
 ```
+
+## Deploy serverless com GPU (Modal.com)
+
+[`modal_app.py`](modal_app.py) adapta o projeto para o [Modal](https://modal.com): a GPU é **serverless** — só "acorda" quando chega um vídeo, carrega o EasyOCR uma vez e fica quente por alguns minutos. O front [`frontend.html`](frontend.html) é servido pelo próprio app.
+
+```bash
+pip install modal
+modal token new            # autentica (uma vez, abre o navegador)
+
+modal serve modal_app.py   # dev: URL temporária com hot-reload
+modal deploy modal_app.py  # produção: URL permanente
+```
+
+Após o `serve`/`deploy`, o Modal imprime a URL do web app (ex.: `https://<voce>--blur-arroba-web.modal.run`). Abra no navegador: o front faz upload, acompanha o progresso e baixa o resultado.
+
+Fluxo:
+
+1. Ao **selecionar** o vídeo, o front chama `POST /wake`, que dispara o cold-start do container GPU (a GPU acorda enquanto o upload acontece).
+2. `POST /jobs` envia o vídeo; o processamento roda em background na GPU (`Blurrer.process.spawn`) e o progresso é gravado num `modal.Dict`.
+3. O front faz polling em `GET /jobs/{id}` e, ao concluir, baixa via `GET /jobs/{id}/download` (arquivo vem de um `modal.Volume`).
+
+> A GPU usada é `T4`. Ajuste em `@app.cls(gpu=...)` (ex.: `"A10G"`, `"L4"`) e o tempo que fica quente em `scaledown_window`. Testado com `modal==1.4.3`.
 
 ## Teste local rápido (sem subir a API)
 
