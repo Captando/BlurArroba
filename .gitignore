@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Modelos baixados pelo EasyOCR
+*.pth
+~/.EasyOCR/
+
+# Mídia (entrada/saída) — não versionar arquivos grandes
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+out_*.mp4
+
+# Diretórios de trabalho
+/tmp/
+uploads/
+outputs/
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
